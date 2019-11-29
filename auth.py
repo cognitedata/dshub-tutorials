@@ -43,7 +43,7 @@ class Auth:
     def authorize_widget(self):
 
         self.project_widget = widgets.Text(description="Project:", value=self.project)
-        self.api_key_widget = widgets.Password(description="API-key:", placeholder="Leave empty to use .env")
+        self.api_key_widget = widgets.Password(description="API key:")
 
         submit_button = widgets.Button(description="Submit")
 
@@ -90,15 +90,11 @@ class Auth:
         os.environ["COGNITE_API_KEY"] = self.api_key
         os.environ["COGNITE_PROJECT"] = self.project
         os.environ["COGNITE_CLIENT_NAME"] = "DataStudio"
-        print("Now using key ", os.environ["COGNITE_API_KEY"])
         
         self.test_api_key()
 
         clear_output()
         display(self.vbox)
-        # os.environ["COGNITE_API_KEY"] = self.api_key
-        # os.environ["COGNITE_PROJECT"] = self.project
-        # print("Saved COGNITE_API_KEY, COGNITE_PROJECT as environment variables.")
 
         if self.on_authorized_api_key:
             self.on_authorized_api_key(cognite_client=self.cognite_client, project=self.project)
