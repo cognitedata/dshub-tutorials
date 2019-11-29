@@ -1,0 +1,6 @@
+jupyterhub==0.9.4
+numpy==1.14.3
+scipy==1.1.0
+matplotlib==2.2.2
+cognite-sdk==1.4.3
+cognite-model-hosting-notebook=0.2.0
