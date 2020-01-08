@@ -79,36 +79,3 @@ def load_asset_mappings(client: CogniteClient, model_id: int, revision_id: int) 
     df_asset_mappings = asset_mappings.to_pandas()
     df_asset_mappings.to_csv(filename, index=False)
     return df_asset_mappings
-
-
-def get_assets_ts_and_true_matches_threedmodel(
-    client: CogniteClient, model_id: int, revision_id: int, root_id: int
-) -> Tuple[pd.DataFrame, pd.Series, pd.Series]:
-    """
-    Get a pd.DataFrame with true_matches (assets mappings for 3D nodes to assets),
-    pd.Series with input names, pd.Series with names to match the input names to.
-    """
-
-    df_threednodes = load_threednodes(client, model_id, revision_id)
-    df_threednodes = filter_df_threednodes(df_threednodes)
-    df_threednodes.rename(columns={"name": "left_side_name"}, inplace=True)
-    df_assets = load_assets(client, root_id).rename(columns={"name": "right_side_name"})
-    df_asset_mappings = load_asset_mappings(client, model_id, revision_id)
-
-    # df_asset_mappings includes only IDs.
-    # In order to get the names we join on the df_assets including all available asset IDs and names.
-    # Similarly we do with df_threednodes.
-    df_true_matches = (
-        df_asset_mappings[["nodeId", "assetId"]]
-        .merge(df_assets[["id", "right_side_name"]], how="left", left_on="assetId", right_on="id",)
-        .drop(columns="id")
-        .merge(df_threednodes[["id", "left_side_name"]], how="left", left_on="nodeId", right_on="id",)[
-            ["left_side_name", "right_side_name"]
-        ]
-    )
-
-    return (
-        df_true_matches,
-        df_threednodes["left_side_name"].values,
-        df_assets["right_side_name"].values,
-    )
