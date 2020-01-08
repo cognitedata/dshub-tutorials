@@ -12,7 +12,7 @@ def load_pd_csv_if_exists(filename: str):
     print(f"No file with filename '{filename}' found.")
 
 
-def load_assets(client: CogniteClient, root_id: int):
+def load_assets(client: CogniteClient, root_id: int) -> pd.DataFrame:
     """
     Load assets from CDF
     """
@@ -27,7 +27,7 @@ def load_assets(client: CogniteClient, root_id: int):
     return df_assets
 
 
-def load_threednodes(client: CogniteClient, model_id: int, revision_id: int):
+def load_threednodes(client: CogniteClient, model_id: int, revision_id: int) -> pd.DataFrame:
     """
     Load 3d-nodes from CDF`.
     """
@@ -46,7 +46,7 @@ def filter_df_threednodes(
     df_threednodes: pd.DataFrame, key_words: List[str] = ("EQUIPMENT", "BRANCH", "STRUCTURE", " of ")
 ) -> pd.DataFrame:
     """
-    Filter out pd.Dataframe based on keywords in ["name"]. The words "EQUIPMENT", "BRANCH", "STRUCTURE", " of "
+    Filter out pd.Dataframe based on keywords in ["name"]. Words in the key_words found in the names
     indicate that 3D nodes do not need contextualization.
     """
     print("Filtering 3D-nodes:")
