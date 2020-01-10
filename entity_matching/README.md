@@ -5,8 +5,12 @@ cp viable_pyproject.toml pyproject.toml
 poetry install
 ```
 
-Convert the .py  ->  .ipynb with: 
-$ poetry run jupytext --to py template_3dnodes_assets.ipynb
+Convert .py  ->  .ipynb with: 
+```sh
+poetry run jupytext --to py template_3dnodes_assets.ipynb
+```
 
-Convert the .py -> .ipyn with: 
-$ poetry run  jupytext --to notebook template_3dnodes_assets.py
+Convert .py -> .ipyn with: 
+```sh
+poetry run  jupytext --to notebook template_3dnodes_assets.py
+```
