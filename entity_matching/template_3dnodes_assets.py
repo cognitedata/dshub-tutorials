@@ -37,8 +37,8 @@ from data_load_cdf import load_assets, load_threednodes, filter_df_threednodes, 
 
 # # Initialize
 
-project = "akerbp"
-api_key_name = "AKERBP_API_KEY"
+project = "my_project"
+api_key_name = "COGNITE_API_KEY"
 
 from getpass import getpass
 api_key = getpass()
