@@ -6,7 +6,7 @@ In this workshop, you begin by getting access to CDF (that means getting an API 
 
 # Tutorial overview
 ## [Lab 1 - getting started](./Lab1.ipynb)
-In this turorial, you will get started with the Cognite SDK and create your first asset.
+In this turorial, you will get started with the Cognite SDK and create and retrieve your first asset.
 
 Additional materials:
  - https://docs.cognite.com/dev/quickstart
@@ -38,3 +38,8 @@ In this turorial, you will learn how to create data sets and tie them to assets 
 
 Additional materials:
  - https://docs.cognite.com/cdf/data_governance/concepts/datasets
+
+# Projects
+## Project 1 - create an extractor
+
+## Project 1 - create an extractor
