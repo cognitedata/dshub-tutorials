@@ -12,7 +12,7 @@ Additional materials:
  - https://docs.cognite.com/dev/quickstart
  - https://docs.cognite.com/dev/concepts/resource_types/assets.html
 
-## Lab 2 - time series and data points (coming soon)
+## [Lab 2 - time series and data points](./Lab2.ipynb)
 In this turorial, you will create time series, populate them with data points and plot the data.
 
 Additional materials:
