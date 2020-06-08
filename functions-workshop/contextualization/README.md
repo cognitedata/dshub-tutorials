@@ -1,0 +1,9 @@
+# Entity Matcher in production - contextualize time series to assets using Cognite Functions
+
+## Introduction
+For every new customer, we ingest their data and perform some sort of contextualization by mapping time series to assets. Quite often, there is not an identical match between a field on the time series to e.g. the asset name, but a somewhat similar name. The most typical example we use in Cognite is the asset `21PT1019` and the time series `IAA_21PT1019.PV` or similar. In our contextualization toolbox (an [API](https://docs.cognite.com/api/playground/#operation/entityMatchingFit) with a corresponding [https://cognite-sdk-experimental.readthedocs-hosted.com/en/latest/cognite.html#contextualization](SDK)), we have a tool to solve this problem called entity matching. Entity matching means joining two datasets one a common key with fuzzyness, and our implementation is a machine learning model that can be trained supervised or unsupervised. 
+
+In this tutorial, we'll take the time series and assets from the `publicdata` tenant, and deploy a Cognite Function that performs entity matching to map the time series to assets, and schedule it so it runs periodically. This can be used out of the box for many customers as an initial contextualization step. 
+
+## Getting test data
+You will need a tenant with write access to run this example. To get the data into your tenant, you can run the [copy-data-to-tenant.ipynb](copy-data-to-tenant) notebook which will populate the data from the `publicdata` tenant into your own. Then you can run the [entity-matcher.ipynb](entity-matcher) notebook directly.
