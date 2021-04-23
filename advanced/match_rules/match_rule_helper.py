@@ -42,11 +42,11 @@ class ResourceHelper:
 
     def get_timeseries(self, limit=-1):
         root_id = self.root_asset_selector.value
-        return [t.dump() for t in self.client.time_series.list(limit=limit, root_asset_ids=[root_id])]
+        return [t.dump() for t in self.client.time_series.list(limit=limit, root_asset_ids=[root_id], partitions=5)]
 
     def get_assets(self, limit=-1):
         root_id = self.root_asset_selector.value
-        return [a.dump() for a in self.client.assets.list(limit=limit, root_ids=[root_id])]
+        return [a.dump() for a in self.client.assets.list(limit=limit, root_ids=[root_id], partitions=5)]
 
 
 class MatchRuleHelper:
