@@ -1,11 +1,12 @@
 import copy
 import json
 from getpass import getpass
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import ipywidgets as widgets
 from cognite.experimental import CogniteClient
 from IPython.display import display
+from msal import PublicClientApplication
 from regex import regex
 
 ID = "id"
@@ -31,10 +32,14 @@ class ResourceHelper:
     def __init__(self, client: CogniteClient):
         self.client = client
 
-        self.root_assets = [a for a in self.client.assets.list(root=True, limit=-1) if "asset" not in a.name][:100]
+        self.root_assets = [
+            a
+            for a in self.client.assets.list(root=True, limit=-1)
+            if "asset" not in a.name
+        ][:100]
         self.root_asset_selector = widgets.Dropdown(
             options=[(a.name, a.id) for a in self.root_assets],
-            description="Select root asset"
+            description="Select root asset",
         )
 
     def select_root_asset(self):
@@ -42,21 +47,62 @@ class ResourceHelper:
 
     def get_timeseries(self, limit=-1):
         root_id = self.root_asset_selector.value
-        return [t.dump() for t in self.client.time_series.list(limit=limit, root_asset_ids=[root_id], partitions=5)]
+        return [
+            t.dump()
+            for t in self.client.time_series.list(
+                limit=limit, root_asset_ids=[root_id], partitions=5
+            )
+        ]
 
     def get_assets(self, limit=-1):
         root_id = self.root_asset_selector.value
-        return [a.dump() for a in self.client.assets.list(limit=limit, root_ids=[root_id], partitions=5)]
+        return [
+            a.dump()
+            for a in self.client.assets.list(
+                limit=limit, root_ids=[root_id], partitions=5
+            )
+        ]
+
+
+def authenticate_azure(base_url: str, tenant_id: str, client_id: str):
+    authority_host_uri = "https://login.microsoftonline.com"
+    authority_uri = authority_host_uri + "/" + tenant_id
+    scopes = [f"{base_url}/.default"]
+    app = PublicClientApplication(client_id=client_id, authority=authority_uri)
+
+    port = 53000
+    creds = app.acquire_token_interactive(scopes=scopes, port=port)
+    return creds
 
 
 class MatchRuleHelper:
-    def __init__(self, project: str):
+    def __init__(
+        self,
+        project: str,
+        base_url: Optional[str] = None,
+        tenant_id: Optional[str] = None,
+        client_id: Optional[str] = None,
+        use_api_key=False,
+    ):
         self.project = project
-        self.client = CogniteClient(
-            project=project,
-            api_key=getpass(f"Please enter {project} API-KEY: "),
-            client_name="dshub"
-        )
+
+        if use_api_key:
+            self.client = CogniteClient(
+                project=project,
+                api_key=getpass(f"Please enter {project} API-KEY: "),
+                client_name="dshub",
+                base_url=base_url,
+            )
+        else:
+            credentials = authenticate_azure(base_url, tenant_id, client_id)
+            self.client = CogniteClient(
+                project=project,
+                client_name="dshub",
+                base_url=base_url,
+                token_client_id=credentials["id_token_claims"]["aud"],
+                token=credentials["access_token"],
+                token_url=credentials["id_token_claims"]["iss"],
+            )
         self.resource_helper = ResourceHelper(self.client)
 
         self.sources = []
@@ -89,33 +135,56 @@ class MatchRuleHelper:
         self.set_targets(self.resource_helper.get_assets(limit))
 
     def add_cdf_matches(self):
-        self.add_match_set("cdf_matches", [(k, v.get("asset_id")) for k, v in self.source_by_id.items() if v.get("asset_id") in self.target_by_id])
+        self.add_match_set(
+            "cdf_matches",
+            [
+                (k, v.get("asset_id"))
+                for k, v in self.source_by_id.items()
+                if v.get("asset_id") in self.target_by_id
+            ],
+        )
 
     def set_targets(self, targets):
         self.targets = targets
-        self.target_entities = [MatchRuleHelper.flatten(target) for target in self.targets]
-        self.target_all_fields = list({k for k in entity} for entity in self.target_entities)
+        self.target_entities = [
+            MatchRuleHelper.flatten(target) for target in self.targets
+        ]
+        self.target_all_fields = list(
+            {k for k in entity} for entity in self.target_entities
+        )
         self.target_by_id = {t[self.target_id]: t for t in self.target_entities}
-        self.reduced_targets = MatchRuleHelper.reduced_entities(self.target_entities, self.target_fields)
+        self.reduced_targets = MatchRuleHelper.reduced_entities(
+            self.target_entities, self.target_fields
+        )
         self.user_match_editor.set_target_entities(self.target_entities)
 
     def set_target_fields(self, target_fields: List[str]):
         self.target_fields = list({self.target_id} | set(target_fields))
-        self.reduced_targets = MatchRuleHelper.reduced_entities(self.target_entities, self.target_fields)
+        self.reduced_targets = MatchRuleHelper.reduced_entities(
+            self.target_entities, self.target_fields
+        )
         self.user_match_editor.set_target_fields(target_fields)
         self.rule_editor.target_field_selector.set_fields(target_fields)
 
     def set_sources(self, sources):
         self.sources = sources
-        self.source_entities = [MatchRuleHelper.flatten(source) for source in self.sources]
-        self.source_all_fields = list({k for k in entity} for entity in self.source_entities)
+        self.source_entities = [
+            MatchRuleHelper.flatten(source) for source in self.sources
+        ]
+        self.source_all_fields = list(
+            {k for k in entity} for entity in self.source_entities
+        )
         self.source_by_id = {s[self.source_id]: s for s in self.source_entities}
-        self.reduced_sources = MatchRuleHelper.reduced_entities(self.source_entities, self.source_fields)
+        self.reduced_sources = MatchRuleHelper.reduced_entities(
+            self.source_entities, self.source_fields
+        )
         self.user_match_editor.set_source_entities(self.source_entities)
 
     def set_source_fields(self, source_fields: List[str]):
         self.source_fields = list({self.source_id} | set(source_fields))
-        self.reduced_sources = MatchRuleHelper.reduced_entities(self.source_entities, self.source_fields)
+        self.reduced_sources = MatchRuleHelper.reduced_entities(
+            self.source_entities, self.source_fields
+        )
         self.user_match_editor.set_source_fields(source_fields)
         self.rule_editor.source_field_selector.set_fields(source_fields)
 
@@ -124,7 +193,10 @@ class MatchRuleHelper:
         if None in match or match in match_list:
             return False
         match_list.append(match)
-        self.user_unambiguous[list_name], self.user_ambiguous[list_name] = MatchRuleHelper.calculate_ambiguous_and_not(match_list)
+        (
+            self.user_unambiguous[list_name],
+            self.user_ambiguous[list_name],
+        ) = MatchRuleHelper.calculate_ambiguous_and_not(match_list)
         self.user_match_editor.set_match_options()
         self.comparator.set_compare_options(None)
 
@@ -136,11 +208,16 @@ class MatchRuleHelper:
         self.user_match_editor.set_match_options()
         self.comparator.set_compare_options(None)
 
-    def get_match_options(self, tuple_list: List[Tuple], source_field: str, target_field: str):
+    def get_match_options(
+        self, tuple_list: List[Tuple], source_field: str, target_field: str
+    ):
         return [
             (
-                (self.source_by_id[match[0]].get(source_field), self.target_by_id[match[1]].get(target_field)),
-                match
+                (
+                    self.source_by_id[match[0]].get(source_field),
+                    self.target_by_id[match[1]].get(target_field),
+                ),
+                match,
             )
             for match in tuple_list
         ]
@@ -161,10 +238,17 @@ class MatchRuleHelper:
         if name in self.user_match_lists:
             print(f"{name} is already a user match list")
             return
-        matches = [m if isinstance(m, tuple) else MatchRuleHelper.dict_to_match(m) for m in matches]
+        matches = [
+            m if isinstance(m, tuple) else MatchRuleHelper.dict_to_match(m)
+            for m in matches
+        ]
         self.user_match_lists[name] = matches
-        self.user_match_editor.match_list_selector.options=[name for name in self.user_match_lists]
-        self.rule_editor.user_match_list_widget.options=[name for name in self.user_match_lists]
+        self.user_match_editor.match_list_selector.options = [
+            name for name in self.user_match_lists
+        ]
+        self.rule_editor.user_match_list_widget.options = [
+            name for name in self.user_match_lists
+        ]
         good, bad = MatchRuleHelper.calculate_ambiguous_and_not(matches)
         self.user_unambiguous[name] = good
         self.user_ambiguous[name] = bad
@@ -181,10 +265,12 @@ class MatchRuleHelper:
             "source_fields": self.source_fields,
             "targets": self.targets,
             "target_fields": self.target_fields,
-            "match_lists": {k: [list(t) for t in v] for k, v in self.user_match_lists.items()},
+            "match_lists": {
+                k: [list(t) for t in v] for k, v in self.user_match_lists.items()
+            },
             "rules": self.rule_editor.rules,
             "deleted_rules": self.rule_editor.deleted_rules,
-            "rule_status": self.rule_editor.status_by_rule_string
+            "rule_status": self.rule_editor.status_by_rule_string,
         }
 
     @staticmethod
@@ -219,7 +305,6 @@ class MatchRuleHelper:
                 disambi.append((k, v))
         return disambi, ambi
 
-
     @staticmethod
     def reduced_entities(entities, entity_fields):
         return [{k: e.get(k) for k in entity_fields} for e in entities]
@@ -229,8 +314,9 @@ class MatchRuleHelper:
         flattened = {
             **{k: v for k, v in entity.items() if not isinstance(v, (dict, list))},
             **{
-                "metadata." + k: entity.get("metadata").get(k) for k in entity.get("metadata", {})
-            }
+                "metadata." + k: entity.get("metadata").get(k)
+                for k in entity.get("metadata", {})
+            },
         }
         return flattened
 
@@ -240,11 +326,21 @@ class MatchRuleHelper:
 
     @staticmethod
     def dict_to_match(d: Dict) -> Tuple:
-        return (d.get("sourceId") or d.get("source", {}).get(ID)), (d.get("targetId") or d.get("target", {}).get(ID))
+        return (d.get("sourceId") or d.get("source", {}).get(ID)), (
+            d.get("targetId") or d.get("target", {}).get(ID)
+        )
 
 
 class EntitySelector:
-    def __init__(self, title: str, entities: List[Dict], display_field: str, id_field: str, style: Dict=None, layout=None):
+    def __init__(
+        self,
+        title: str,
+        entities: List[Dict],
+        display_field: str,
+        id_field: str,
+        style: Dict = None,
+        layout=None,
+    ):
         self.title = title
         self.entities = entities
         self.filtered = set()
@@ -259,16 +355,17 @@ class EntitySelector:
             description=self.title,
             disabled=False,
             style=style,
-            layout=layout
+            layout=layout,
         )
         self.widget = self.entity_dropdown
 
     def get_options(self):
         all_options = [
             (e.get(self.display_field, "No value"), e[self.id_field])
-            for e in self.entities if e[self.id_field] not in self.filtered
+            for e in self.entities
+            if e[self.id_field] not in self.filtered
         ]
-        return [e for e in all_options if self.substring in str(e[0])][:self.limit]
+        return [e for e in all_options if self.substring in str(e[0])][: self.limit]
 
     def _set_options(self):
         options = self.get_options()
@@ -307,7 +404,7 @@ class FieldSelector:
             description=self.title,
             disabled=False,
             style=style,
-            layout=layout
+            layout=layout,
         )
 
     def set_fields(self, fields: List[str]):
@@ -327,7 +424,7 @@ class UserMatchEditor:
     def __init__(self, match_rule_helper: MatchRuleHelper):
         self.match_rule_helper = match_rule_helper
 
-        style = {'description_width': '20%'}
+        style = {"description_width": "20%"}
         lay50 = widgets.Layout(width="50%")
         lay25 = widgets.Layout(width="25%")
 
@@ -337,14 +434,14 @@ class UserMatchEditor:
             self.match_rule_helper.source_id,
             self.match_rule_helper.source_id,
             style=style,
-            layout=lay50
+            layout=lay50,
         )
         self.source_field_selector = FieldSelector(
             "Source field",
             self.match_rule_helper.source_fields,
             self.match_rule_helper.source_id,
             style=style,
-            layout=lay50
+            layout=lay50,
         )
 
         self.target_selector = EntitySelector(
@@ -353,7 +450,7 @@ class UserMatchEditor:
             self.match_rule_helper.target_id,
             self.match_rule_helper.target_id,
             style=style,
-            layout=lay50
+            layout=lay50,
         )
 
         self.target_field_selector = FieldSelector(
@@ -361,16 +458,18 @@ class UserMatchEditor:
             self.match_rule_helper.target_fields,
             self.match_rule_helper.target_id,
             style=style,
-            layout=lay50
+            layout=lay50,
         )
 
         self.match_list_selector = widgets.Dropdown(
-            options=[list_name for list_name in self.match_rule_helper.user_match_lists],
+            options=[
+                list_name for list_name in self.match_rule_helper.user_match_lists
+            ],
             value=DEFAULT,
             description=MATCH_LISTS,
             disabled=False,
             style=style,
-            layout=lay50
+            layout=lay50,
         )
 
         self.match_selector = widgets.Dropdown(
@@ -379,63 +478,88 @@ class UserMatchEditor:
             description=MATCHES,
             disabled=False,
             style=style,
-            layout=lay50
+            layout=lay50,
         )
 
-        self.add_match_button = widgets.Button(description="Add match", style=style, layout=lay50)
-        self.remove_match_button = widgets.Button(description="Remove match", style=style, layout=lay50)
+        self.add_match_button = widgets.Button(
+            description="Add match", style=style, layout=lay50
+        )
+        self.remove_match_button = widgets.Button(
+            description="Remove match", style=style, layout=lay50
+        )
 
         self.add_match_button.on_click(self._add_match)
         self.remove_match_button.on_click(self._remove_match)
 
         self.source_search = widgets.Text(
-            value='',
-            placeholder='substring',
-            description='Search sources:',
+            value="",
+            placeholder="substring",
+            description="Search sources:",
             disabled=False,
-            style=style, layout=lay50
+            style=style,
+            layout=lay50,
         )
         self.target_search = widgets.Text(
-            value='',
-            placeholder='substring',
-            description='Search targets:',
+            value="",
+            placeholder="substring",
+            description="Search targets:",
             disabled=False,
-            style=style, layout=lay50
+            style=style,
+            layout=lay50,
         )
 
         self.source_search.observe(
-            handler=lambda x: self.source_selector.set_substring(self.source_search.value),
-            names=["value"]
+            handler=lambda x: self.source_selector.set_substring(
+                self.source_search.value
+            ),
+            names=["value"],
         )
         self.target_search.observe(
-            handler=lambda x: self.target_selector.set_substring(self.target_search.value),
-            names=["value"]
+            handler=lambda x: self.target_selector.set_substring(
+                self.target_search.value
+            ),
+            names=["value"],
         )
 
         self.source_field_selector.observe(
             lambda x: self.source_selector.set_display_field(
-                self.source_field_selector.get_field()) or self.set_match_options()
+                self.source_field_selector.get_field()
+            )
+            or self.set_match_options()
         )
         self.target_field_selector.observe(
             lambda x: self.target_selector.set_display_field(
-                self.target_field_selector.get_field()) or self.set_match_options()
+                self.target_field_selector.get_field()
+            )
+            or self.set_match_options()
         )
 
-        self.match_list_selector.observe(handler=self.set_match_options, names=["value"])
+        self.match_list_selector.observe(
+            handler=self.set_match_options, names=["value"]
+        )
 
-        self.widget = widgets.VBox([
-            widgets.HBox([self.source_field_selector.widget, self.target_field_selector.widget]),
-            widgets.HBox([self.source_search, self.target_search]),
-            widgets.HBox([self.source_selector.widget, self.target_selector.widget]),
-            widgets.HBox([self.match_list_selector, self.match_selector]),
-            widgets.HBox([self.add_match_button, self.remove_match_button]),
-        ])
+        self.widget = widgets.VBox(
+            [
+                widgets.HBox(
+                    [
+                        self.source_field_selector.widget,
+                        self.target_field_selector.widget,
+                    ]
+                ),
+                widgets.HBox([self.source_search, self.target_search]),
+                widgets.HBox(
+                    [self.source_selector.widget, self.target_selector.widget]
+                ),
+                widgets.HBox([self.match_list_selector, self.match_selector]),
+                widgets.HBox([self.add_match_button, self.remove_match_button]),
+            ]
+        )
 
     def _get_match_options(self, limit: int = 100):
         return self.match_rule_helper.get_match_options(
             self.match_rule_helper.user_match_lists[self.match_list_selector.value],
             self.source_field_selector.get_field(),
-            self.target_field_selector.get_field()
+            self.target_field_selector.get_field(),
         )[:limit]
 
     def set_match_options(self, button=None):
@@ -487,19 +611,21 @@ class RuleEditor:
 
         self.applied_rules = []
 
-        style = {'description_width': '20%'}
-        style_2 = {'description_width': '40%'}
+        style = {"description_width": "20%"}
+        style_2 = {"description_width": "40%"}
         lay100 = widgets.Layout(width="100%")
         lay50 = widgets.Layout(width="50%")
         lay25 = widgets.Layout(width="25%")
 
         self.user_match_list_widget = widgets.Dropdown(
-            options=[list_name for list_name in self.match_rule_helper.user_match_lists],
+            options=[
+                list_name for list_name in self.match_rule_helper.user_match_lists
+            ],
             value=DEFAULT,
             description=MATCH_LISTS,
             disabled=False,
             style=style,
-            layout=lay50
+            layout=lay50,
         )
 
         self.generate_rules_button = widgets.Button(
@@ -513,28 +639,28 @@ class RuleEditor:
             placeholder="status",
             description="Status:",
             style=style,
-            layout=lay50
+            layout=lay50,
         )
 
         self.rule_info = {}
 
         self.rule_widget = widgets.Dropdown(
-            options=[],
-            value=None,
-            description="Rule #",
-            style=style,
-            layout=lay50
+            options=[], value=None, description="Rule #", style=style, layout=lay50
         )
 
         self.source_field_selector = FieldSelector(
-            "Source field", self.match_rule_helper.source_fields, self.match_rule_helper.source_id,
+            "Source field",
+            self.match_rule_helper.source_fields,
+            self.match_rule_helper.source_id,
             style=style,
-            layout=lay50
+            layout=lay50,
         )
         self.target_field_selector = FieldSelector(
-            "Target field", self.match_rule_helper.target_fields, self.match_rule_helper.target_id,
+            "Target field",
+            self.match_rule_helper.target_fields,
+            self.match_rule_helper.target_id,
             style=style,
-            layout=lay50
+            layout=lay50,
         )
 
         self.source_field_selector.observe(self._update_rule_matches_and_info)
@@ -545,42 +671,68 @@ class RuleEditor:
             value=None,
             description="Rule matches",
             style=style,
-            layout=lay50
+            layout=lay50,
         )
 
-        self.number_of_matches_widget = widgets.HTML(value=None, description="# Matches:", style=style_2, layout=lay25)
-        self.priority_widget = widgets.HTML(value=None, description="Priority: ", style=style_2, layout=lay25)
-        self.source_match_widget = widgets.HTML(value=None, description="Source:", style=style, layout=lay50)
-        self.target_match_widget = widgets.HTML(value=None, description="Target:", style=style, layout=lay50)
+        self.number_of_matches_widget = widgets.HTML(
+            value=None, description="# Matches:", style=style_2, layout=lay25
+        )
+        self.priority_widget = widgets.HTML(
+            value=None, description="Priority: ", style=style_2, layout=lay25
+        )
+        self.source_match_widget = widgets.HTML(
+            value=None, description="Source:", style=style, layout=lay50
+        )
+        self.target_match_widget = widgets.HTML(
+            value=None, description="Target:", style=style, layout=lay50
+        )
 
-        self.rule_matches_widget.observe(handler=self._update_rule_match_info, names=["value"])
-        self.rule_widget.observe(handler=self._update_rule_matches_and_info, names="value")
+        self.rule_matches_widget.observe(
+            handler=self._update_rule_match_info, names=["value"]
+        )
+        self.rule_widget.observe(
+            handler=self._update_rule_matches_and_info, names="value"
+        )
 
         self.rule_action_widget = widgets.Dropdown(
             description="Status:",
             options=[UNHANDLED, CONFIRMED, DELETED],
             value=UNHANDLED,
             style=style,
-            layout=lay50
+            layout=lay50,
         )
         self.rule_action_widget.observe(handler=self._rule_action, names=["value"])
 
-        self.apply_change_button = widgets.Button(description=NO_CHANGE, style=style, layout=lay50)
+        self.apply_change_button = widgets.Button(
+            description=NO_CHANGE, style=style, layout=lay50
+        )
         self.apply_change_button.on_click(self._check_status(self._apply_changes))
 
-        self.conflict_dropdown = widgets.Dropdown(description="0 conflicting rules", style=style, layout=lay50)
-        self.overlap_dropdown = widgets.Dropdown(description="0 overlapping rules", style=style, layout=lay50)
+        self.conflict_dropdown = widgets.Dropdown(
+            description="0 conflicting rules", style=style, layout=lay50
+        )
+        self.overlap_dropdown = widgets.Dropdown(
+            description="0 overlapping rules", style=style, layout=lay50
+        )
 
         self.rule_info_widget = widgets.VBox(
             [
                 widgets.HBox([self.rule_widget, self.rule_action_widget]),
-                widgets.HBox([self.rule_matches_widget, self.number_of_matches_widget, self.priority_widget]),
+                widgets.HBox(
+                    [
+                        self.rule_matches_widget,
+                        self.number_of_matches_widget,
+                        self.priority_widget,
+                    ]
+                ),
                 widgets.HBox([self.conflict_dropdown, self.overlap_dropdown]),
                 widgets.HBox([self.source_match_widget, self.target_match_widget]),
             ]
         )
 
-        self.user_match_list_widget.observe(handler=self._update_rule_info_widget, names=["value"])
+        self.user_match_list_widget.observe(
+            handler=self._update_rule_info_widget, names=["value"]
+        )
 
         self.fancy_match = widgets.HTML(value=None, layout=lay100)
 
@@ -588,9 +740,14 @@ class RuleEditor:
             [
                 widgets.HBox([self.user_match_list_widget, self.status_widget]),
                 widgets.HBox([self.generate_rules_button, self.apply_change_button]),
-                widgets.HBox([self.source_field_selector.widget, self.target_field_selector.widget]),
+                widgets.HBox(
+                    [
+                        self.source_field_selector.widget,
+                        self.target_field_selector.widget,
+                    ]
+                ),
                 self.rule_info_widget,
-                self.fancy_match
+                self.fancy_match,
             ]
         )
 
@@ -604,7 +761,9 @@ class RuleEditor:
         options = [t[1] for t in self.rule_matches_widget.options]
         match_index = options.index(rule_match)
         info = self.rule_info[str(rule)]
-        extractors = _label_groups(copy.deepcopy(rule["extractors"]), rule["conditions"])
+        extractors = _label_groups(
+            copy.deepcopy(rule["extractors"]), rule["conditions"]
+        )
         self.fancy_match.value = _color_match(extractors, info["matches"][match_index])
 
     def _set_status(self, value):
@@ -623,11 +782,18 @@ class RuleEditor:
 
     def _generate_rules(self, button):
         self._set_status(GENERATING_RULES)
-        sources, targets = self.match_rule_helper.reduced_sources, self.match_rule_helper.reduced_targets
-        matches = self.match_rule_helper.user_match_lists[self.user_match_list_widget.value]
+        sources, targets = (
+            self.match_rule_helper.reduced_sources,
+            self.match_rule_helper.reduced_targets,
+        )
+        matches = self.match_rule_helper.user_match_lists[
+            self.user_match_list_widget.value
+        ]
         matches = [MatchRuleHelper.match_to_dict(m) for m in matches]
 
         suggest_response = self.client.match_rules.suggest(sources, targets, matches)
+        self._set_status(f"{GENERATING_RULES} job id: {suggest_response.job_id}")
+
         suggest_result = suggest_response.result
         for rule in suggest_result["rules"]:
             self.add_rule(rule)
@@ -637,8 +803,13 @@ class RuleEditor:
     def _apply_rules(self, button=None):
         self._set_status(APPLYING_RULES)
         self._clean_up_deleted_rules()
-        sources, targets = self.match_rule_helper.reduced_sources, self.match_rule_helper.reduced_targets
+        sources, targets = (
+            self.match_rule_helper.reduced_sources,
+            self.match_rule_helper.reduced_targets,
+        )
         apply_response = self.client.match_rules.apply(sources, targets, self.rules)
+        apply_job_id = apply_response.job_id
+        self._set_status(APPLYING_RULES + f" job id: {apply_job_id}")
 
         self.apply_result = apply_response.result
         self.fancy_rules = apply_response.rules
@@ -648,13 +819,20 @@ class RuleEditor:
         self._set_status(READY)
 
     def _update_rule_info(self, apply_result):
-        self.rule_info = {str(rule): apply_result["items"][i] for i, rule in enumerate(self.rules)}
+        self.rule_info = {
+            str(rule): apply_result["items"][i] for i, rule in enumerate(self.rules)
+        }
 
         matches = []
         for info in self.rule_info.values():
-            info["match_tuples"] = [MatchRuleHelper.dict_to_match(d) for d in info["matches"]]
+            info["match_tuples"] = [
+                MatchRuleHelper.dict_to_match(d) for d in info["matches"]
+            ]
             matches.extend(info["match_tuples"])
-        self.matches, self.ambiguous_matches = MatchRuleHelper.calculate_ambiguous_and_not(matches)
+        (
+            self.matches,
+            self.ambiguous_matches,
+        ) = MatchRuleHelper.calculate_ambiguous_and_not(matches)
         self._update_rule_info_widget(None)
 
     def _update_rule_info_widget(self, _):
@@ -686,7 +864,7 @@ class RuleEditor:
             options = self.match_rule_helper.get_match_options(
                 match_tuples,
                 self.source_field_selector.get_field(),
-                self.target_field_selector.get_field()
+                self.target_field_selector.get_field(),
             )[:limit]
             if self.rule_matches_widget.value not in options:
                 self.rule_matches_widget.value = None
@@ -694,18 +872,24 @@ class RuleEditor:
             info = self.rule_info[str(self.rules[rule_number])]
             self.number_of_matches_widget.value = str(info["numberOfMatches"])
             self.priority_widget.value = str(rule["priority"])
-            self.rule_action_widget.value = self.status_by_rule_string.get(rule_string, UNHANDLED)
+            self.rule_action_widget.value = self.status_by_rule_string.get(
+                rule_string, UNHANDLED
+            )
 
             conflicts = self.rule_info[rule_string].get("conflicts")
             overlaps = self.rule_info[rule_string].get("overlaps")
         self.conflict_dropdown.description = f"{len(conflicts)} conflicting rules"
         self.conflict_dropdown.value = None
-        self.conflict_dropdown.options = [RuleEditor.conflict_to_string(c) for c in conflicts]
+        self.conflict_dropdown.options = [
+            RuleEditor.conflict_to_string(c) for c in conflicts
+        ]
         if conflicts:
             self.conflict_dropdown.value = self.conflict_dropdown.options[0]
         self.overlap_dropdown.description = f"{len(overlaps)} overlapping rules"
         self.overlap_dropdown.value = None
-        self.overlap_dropdown.options = [RuleEditor.conflict_to_string(o) for o in overlaps]
+        self.overlap_dropdown.options = [
+            RuleEditor.conflict_to_string(o) for o in overlaps
+        ]
         if overlaps:
             self.overlap_dropdown.value = self.overlap_dropdown.options[0]
 
@@ -718,17 +902,19 @@ class RuleEditor:
         else:
             self.source_match_widget.value = json.dumps(
                 {
-                    k: v for k, v in self.match_rule_helper.source_by_id[match[0]].items()
+                    k: v
+                    for k, v in self.match_rule_helper.source_by_id[match[0]].items()
                     if k in self.match_rule_helper.source_fields
                 },
-                indent=2
+                indent=2,
             )
             self.target_match_widget.value = json.dumps(
                 {
-                    k: v for k, v in self.match_rule_helper.target_by_id[match[1]].items()
+                    k: v
+                    for k, v in self.match_rule_helper.target_by_id[match[1]].items()
                     if k in self.match_rule_helper.target_fields
                 },
-                indent=2
+                indent=2,
             )
         self.display_fancy_match()
 
@@ -750,8 +936,12 @@ class RuleEditor:
             self.apply_change_button.description = NO_CHANGE
 
     def _clean_up_deleted_rules(self):
-        self.deleted_rules.extend([r for i, r in enumerate(self.rules) if i in self.delete_changes])
-        self.rules = [r for i, r in enumerate(self.rules) if i not in self.delete_changes]
+        self.deleted_rules.extend(
+            [r for i, r in enumerate(self.rules) if i in self.delete_changes]
+        )
+        self.rules = [
+            r for i, r in enumerate(self.rules) if i not in self.delete_changes
+        ]
         self.delete_changes = set()
         self._notice_changes()
 
@@ -783,41 +973,74 @@ class MatchComparator:
         self.match_rule_helper = match_rule_helper
         self.match_lists = self.match_rule_helper.user_match_lists
         self.rule_editor = self.match_rule_helper.rule_editor
-        self.source_field_selector = self.match_rule_helper.user_match_editor.source_field_selector
-        self.target_field_selector = self.match_rule_helper.user_match_editor.target_field_selector
-
-        style = {'description_width': '20%'}
-        self.first_list_selector = widgets.Dropdown(
-            options=self._get_list_options(), value=RULE_OUTPUT, layout=widgets.Layout(width="50%"), style=style)
-        self.second_list_selector = widgets.Dropdown(
-            options=self._get_list_options(), value=DEFAULT, layout=widgets.Layout(width="50%"), style=style
+        self.source_field_selector = (
+            self.match_rule_helper.user_match_editor.source_field_selector
+        )
+        self.target_field_selector = (
+            self.match_rule_helper.user_match_editor.target_field_selector
         )
 
-        self.agreed_list = widgets.Dropdown(layout=widgets.Layout(width="99%"), style=style)
-        self.first_only_list = widgets.Dropdown(layout=widgets.Layout(width="50%"), style=style)
-        self.first_ambiguous = widgets.Dropdown(layout=widgets.Layout(width="50%"), style=style)
-        self.second_only_list = widgets.Dropdown(layout=widgets.Layout(width="50%"), style=style)
-        self.second_ambiguous = widgets.Dropdown(layout=widgets.Layout(width="50%"), style=style)
-        self.disagreement_list = widgets.Dropdown(layout=widgets.Layout(width="99%"), style=style)
+        style = {"description_width": "20%"}
+        self.first_list_selector = widgets.Dropdown(
+            options=self._get_list_options(),
+            value=RULE_OUTPUT,
+            layout=widgets.Layout(width="50%"),
+            style=style,
+        )
+        self.second_list_selector = widgets.Dropdown(
+            options=self._get_list_options(),
+            value=DEFAULT,
+            layout=widgets.Layout(width="50%"),
+            style=style,
+        )
 
-        self.first_disagreed = widgets.HTML(description="first says:", layout=widgets.Layout(width="50%"), style=style)
+        self.agreed_list = widgets.Dropdown(
+            layout=widgets.Layout(width="99%"), style=style
+        )
+        self.first_only_list = widgets.Dropdown(
+            layout=widgets.Layout(width="50%"), style=style
+        )
+        self.first_ambiguous = widgets.Dropdown(
+            layout=widgets.Layout(width="50%"), style=style
+        )
+        self.second_only_list = widgets.Dropdown(
+            layout=widgets.Layout(width="50%"), style=style
+        )
+        self.second_ambiguous = widgets.Dropdown(
+            layout=widgets.Layout(width="50%"), style=style
+        )
+        self.disagreement_list = widgets.Dropdown(
+            layout=widgets.Layout(width="99%"), style=style
+        )
+
+        self.first_disagreed = widgets.HTML(
+            description="first says:", layout=widgets.Layout(width="50%"), style=style
+        )
         self.second_disagreed = widgets.HTML(
             description="second says:", layout=widgets.Layout(width="50%"), style=style
         )
 
-        self.first_list_selector.observe(self._combine_lists, names=["value", "options"])
-        self.second_list_selector.observe(self._combine_lists, names=["value", "options"])
+        self.first_list_selector.observe(
+            self._combine_lists, names=["value", "options"]
+        )
+        self.second_list_selector.observe(
+            self._combine_lists, names=["value", "options"]
+        )
 
-        self.disagreement_list.observe(self._select_disagreed, names=["value", "options"])
+        self.disagreement_list.observe(
+            self._select_disagreed, names=["value", "options"]
+        )
 
-        self.widget = widgets.VBox([
-            widgets.HBox([self.first_list_selector, self.second_list_selector]),
-            widgets.HBox([self.first_only_list, self.second_only_list]),
-            widgets.HBox([self.first_ambiguous, self.second_ambiguous]),
-            self.agreed_list,
-            self.disagreement_list,
-            widgets.HBox([self.first_disagreed, self.second_disagreed]),
-        ])
+        self.widget = widgets.VBox(
+            [
+                widgets.HBox([self.first_list_selector, self.second_list_selector]),
+                widgets.HBox([self.first_only_list, self.second_only_list]),
+                widgets.HBox([self.first_ambiguous, self.second_ambiguous]),
+                self.agreed_list,
+                self.disagreement_list,
+                widgets.HBox([self.first_disagreed, self.second_disagreed]),
+            ]
+        )
 
     def set_compare_options(self, _):
         self.first_list_selector.value = RULE_OUTPUT
@@ -832,7 +1055,10 @@ class MatchComparator:
         if key == RULE_OUTPUT:
             return self.rule_editor.matches, self.rule_editor.ambiguous_matches
         else:
-            return self.match_rule_helper.user_unambiguous[key], self.match_rule_helper.user_ambiguous[key]
+            return (
+                self.match_rule_helper.user_unambiguous[key],
+                self.match_rule_helper.user_ambiguous[key],
+            )
 
     def _combine_lists(self, _=None):
         first = self.first_list_selector.value
@@ -843,41 +1069,70 @@ class MatchComparator:
         matches = {key: self._get_matches(key) for key in [first, second]}
 
         self.first_ambiguous.value = None
-        options = [self.match_rule_helper.get_source_tuple(x, source_field) for x in matches[first][1]]
+        options = [
+            self.match_rule_helper.get_source_tuple(x, source_field)
+            for x in matches[first][1]
+        ]
         self.first_ambiguous.options = options[:100]
         self.first_ambiguous.description = f"{len(options)} ambiguous"
 
         self.second_ambiguous.value = None
-        options = [self.match_rule_helper.get_source_tuple(x, source_field) for x in matches[second][1]]
+        options = [
+            self.match_rule_helper.get_source_tuple(x, source_field)
+            for x in matches[second][1]
+        ]
         self.second_ambiguous.options = options[:100]
         self.second_ambiguous.description = f"{len(options)} ambiguous"
 
-        match_dicts = {key: {m[0]: m[1] for m in matches[key][0]} for key in [first, second]}
+        match_dicts = {
+            key: {m[0]: m[1] for m in matches[key][0]} for key in [first, second]
+        }
 
-        agreed = [(k, v) for k, v in match_dicts[first].items() if match_dicts[second].get(k)==v]
-        disagreed = [
-            k for k, v in match_dicts[first].items() if match_dicts[second].get(k) not in {None, v}
+        agreed = [
+            (k, v)
+            for k, v in match_dicts[first].items()
+            if match_dicts[second].get(k) == v
         ]
-        just_first = [(k, v) for k, v in match_dicts[first].items() if k not in match_dicts[second]]
-        just_second = [(k, v) for k, v in match_dicts[second].items() if k not in match_dicts[first]]
+        disagreed = [
+            k
+            for k, v in match_dicts[first].items()
+            if match_dicts[second].get(k) not in {None, v}
+        ]
+        just_first = [
+            (k, v)
+            for k, v in match_dicts[first].items()
+            if k not in match_dicts[second]
+        ]
+        just_second = [
+            (k, v)
+            for k, v in match_dicts[second].items()
+            if k not in match_dicts[first]
+        ]
 
         self.agreed_list.value = None
-        self.agreed_list.options = self.match_rule_helper.get_match_options(agreed[:100], source_field, target_field)
+        self.agreed_list.options = self.match_rule_helper.get_match_options(
+            agreed[:100], source_field, target_field
+        )
         self.agreed_list.description = f"Agree on {len(agreed)} matches:"
 
         self.disagreement_list.value = None
         self.disagreement_list.options = [
-            self.match_rule_helper.get_source_tuple(x, source_field) for x in disagreed[:100]
+            self.match_rule_helper.get_source_tuple(x, source_field)
+            for x in disagreed[:100]
         ]
         self.disagreement_list.description = f"Disagree on {len(disagreed)} matches:"
 
         self.first_only_list.value = None
-        options = self.match_rule_helper.get_match_options(just_first, source_field, target_field)
+        options = self.match_rule_helper.get_match_options(
+            just_first, source_field, target_field
+        )
         self.first_only_list.options = options[:100]
         self.first_only_list.description = f"{len(options)} unique:"
 
         self.second_only_list.value = None
-        options = self.match_rule_helper.get_match_options(just_second, source_field, target_field)
+        options = self.match_rule_helper.get_match_options(
+            just_second, source_field, target_field
+        )
         self.second_only_list.options = options[:100]
         self.second_only_list.description = f"{len(options)} unique:"
 
@@ -889,27 +1144,42 @@ class MatchComparator:
         second = self.second_list_selector.value
         matches = {key: self._get_matches(key) for key in [first, second]}
 
-        first_target = ([k[1] for k in matches[first][0] if k[0] == source_id] + [None])[0]
-        second_target = ([k[1] for k in matches[second][0] if k[0] == source_id] + [None])[0]
+        first_target = (
+            [k[1] for k in matches[first][0] if k[0] == source_id] + [None]
+        )[0]
+        second_target = (
+            [k[1] for k in matches[second][0] if k[0] == source_id] + [None]
+        )[0]
 
         if None in (first_target, second_target):
             return
         first_entity = self.match_rule_helper.target_by_id[first_target]
         self.first_disagreed.value = json.dumps(
-            {k: first_entity.get(k) for k in self.match_rule_helper.target_fields}, indent=2
+            {k: first_entity.get(k) for k in self.match_rule_helper.target_fields},
+            indent=2,
         )
 
         second_entity = self.match_rule_helper.target_by_id[second_target]
         self.second_disagreed.value = json.dumps(
-            {k: second_entity.get(k) for k in self.match_rule_helper.target_fields}, indent=2
+            {k: second_entity.get(k) for k in self.match_rule_helper.target_fields},
+            indent=2,
         )
 
 
 # Copied and modified from sdk
 def _color_match(extractors: List[Dict], match: Dict):
-    columns = sorted(list({(extractor["entitySet"][:-1], extractor["field"]) for extractor in extractors}))  # order?
+    columns = sorted(
+        list(
+            {
+                (extractor["entitySet"][:-1], extractor["field"])
+                for extractor in extractors
+            }
+        )
+    )  # order?
     patterns = {
-        (extractor["entitySet"][:-1], extractor["field"]): extractor["pattern"].strip("^$")
+        (extractor["entitySet"][:-1], extractor["field"]): extractor["pattern"].strip(
+            "^$"
+        )
         for extractor in extractors
         if extractor["extractorType"] == "regex"
     }
@@ -922,17 +1192,25 @@ def _color_match(extractors: List[Dict], match: Dict):
             continue
         source_target = extractor["entitySet"][:-1]  # singular
         field = extractor["field"]
-        regex_match = regex.match(extractor["pattern"], match.get(source_target, {}).get(field, ""))
+        regex_match = regex.match(
+            extractor["pattern"], match.get(source_target, {}).get(field, "")
+        )
         if not regex_match:
             print(
-                "Unexpected lack of match of ", extractor["pattern"], match.get(source_target), field,
+                "Unexpected lack of match of ",
+                extractor["pattern"],
+                match.get(source_target),
+                field,
             )
             continue
         formatted_field = regex_match.expand(extractor["restorePattern"])
         formatted[source_target][field] = formatted_field
 
     html = ",  ".join(
-        [f"{source_target}.{field}: {formatted[source_target][field]}" for source_target, field in columns]
+        [
+            f"{source_target}.{field}: {formatted[source_target][field]}"
+            for source_target, field in columns
+        ]
     )
     return html
 
@@ -978,7 +1256,9 @@ def _label_groups(extractors: List[Dict], conditions: List[Dict]):
                 return f"\\g<{group_counter}>"
 
         extractor["restorePattern"] = (
-            "<font color='#666'>" + regex.sub(r"\(.*?\)", color_group, extractor["pattern"].strip("$^")) + "</font>"
+            "<font color='#666'>"
+            + regex.sub(r"\(.*?\)", color_group, extractor["pattern"].strip("$^"))
+            + "</font>"
         )
 
     return extractors
